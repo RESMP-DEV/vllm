@@ -218,3 +218,14 @@ csrc/moe/marlin_moe_wna16/kernel_*
 
 # Ignore ep_kernels_workspace folder
 ep_kernels_workspace/
+# Ignore local model checkpoints and artifacts
+Qwen3-Next-80B-A3B-Thinking-NVFP4/
+*.safetensors
+*.safetensors.index.json
+tokenizer.json
+tokenizer_config.json
+special_tokens_map.json
+generation_config.json
+added_tokens.json
+merges.txt
+vocab.json
