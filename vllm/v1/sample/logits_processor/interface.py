@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 
-from vllm import SamplingParams
+try:
+    from vllm import SamplingParams
+except Exception:  # Fallback if top-level attribute export is unavailable
+    from vllm.sampling_params import SamplingParams  # type: ignore
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig

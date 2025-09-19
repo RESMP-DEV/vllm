@@ -311,8 +311,25 @@ class VllmConfig:
 
         # summarize vllm config
         vllm_factors: list[Any] = []
-        from vllm import __version__
-        vllm_factors.append(__version__)
+
+        # Be resilient to environments where top-level vllm attribute exports
+        # are not available or resolve to a namespace package.
+        def _get_vllm_version() -> str:
+            try:
+                from vllm import __version__ as _v
+                return _v
+            except Exception:
+                try:
+                    from vllm.version import __version__ as _v2  # type: ignore
+                    return _v2
+                except Exception:
+                    try:
+                        import importlib.metadata as _ilmd
+                        return _ilmd.version("vllm")
+                    except Exception:
+                        return "dev"
+
+        vllm_factors.append(_get_vllm_version())
         vllm_factors.append(envs.VLLM_USE_V1)
         if self.model_config:
             vllm_factors.append(self.model_config.compute_hash())

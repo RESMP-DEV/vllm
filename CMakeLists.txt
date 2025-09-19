@@ -555,11 +555,14 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
     set(SRCS
       "csrc/quantization/fp4/nvfp4_quant_kernels.cu"
       "csrc/quantization/fp4/activation_nvfp4_quant_fusion_kernels.cu"
+      "csrc/quantization/fp4/nvfp4_experts_quant.cu"
       "csrc/quantization/fp4/nvfp4_scaled_mm_sm120_kernels.cu")
     set_gencode_flags_for_srcs(
       SRCS "${SRCS}"
       CUDA_ARCHS "${FP4_ARCHS}")
     list(APPEND VLLM_EXT_SRC "${SRCS}")
+    # Enable SM120 NVFP4 flag. Experts quant and grouped GEMM sources
+    # are guarded to also compile under SM120.
     list(APPEND VLLM_GPU_FLAGS "-DENABLE_NVFP4_SM120=1")
     message(STATUS "Building NVFP4 for archs: ${FP4_ARCHS}")
   else()
@@ -656,7 +659,8 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
   endif()
 
   # moe_data.cu is used by all CUTLASS MoE kernels.
-  cuda_archs_loose_intersection(CUTLASS_MOE_DATA_ARCHS "9.0a;10.0a" "${CUDA_ARCHS}")
+  # Extend support to SM120 (12.0/12.0a) which also uses these helpers.
+  cuda_archs_loose_intersection(CUTLASS_MOE_DATA_ARCHS "9.0a;10.0a;12.0;12.0a" "${CUDA_ARCHS}")
   if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.3 AND CUTLASS_MOE_DATA_ARCHS)
     set(SRCS "csrc/quantization/cutlass_w8a8/moe/moe_data.cu")
     set_gencode_flags_for_srcs(
@@ -672,6 +676,25 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
     else()
       message(STATUS "Not building moe_data as no compatible archs found "
                      "in CUDA target architectures.")
+    endif()
+  endif()
+
+  # Also build the NVFP4 blockwise grouped GEMM for SM120 so FP4 MoE path
+  # is available on GeForce Blackwell as well.
+  cuda_archs_loose_intersection(FP4_GROUP_MM_ARCHS "12.0;12.0a" "${CUDA_ARCHS}")
+  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND FP4_GROUP_MM_ARCHS)
+    set(SRCS "csrc/quantization/fp4/nvfp4_blockwise_moe_kernel.cu")
+    set_gencode_flags_for_srcs(
+      SRCS "${SRCS}"
+      CUDA_ARCHS "${FP4_GROUP_MM_ARCHS}")
+    list(APPEND VLLM_EXT_SRC "${SRCS}")
+    # Kernel source is guarded to also compile under SM120 feature flag.
+    message(STATUS "Building NVFP4 blockwise grouped GEMM for archs: ${FP4_GROUP_MM_ARCHS}")
+  else()
+    if (NOT ${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND FP4_GROUP_MM_ARCHS)
+      message(STATUS "Not building NVFP4 blockwise grouped GEMM as CUDA Compiler version is "
+                     "not >= 12.8, we recommend upgrading to CUDA 12.8 or later "
+                     "if you intend on running FP4 quantized MoE models on Blackwell.")
     endif()
   endif()
 

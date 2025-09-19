@@ -161,21 +161,53 @@ class FlashInferExperts(mk.FusedMoEPermuteExpertsUnpermute):
             fc1_expert_weights = w1.view(torch.long)
             fc2_expert_weights = w2.view(torch.long)
 
-        _ = flashinfer_cutlass_fused_moe(
-            input=hidden_states,
-            token_selected_experts=topk_ids.to(torch.int),
-            token_final_scales=topk_weights,
-            fc1_expert_weights=fc1_expert_weights,
-            fc2_expert_weights=fc2_expert_weights,
-            output_dtype=self.out_dtype,
-            quant_scales=quant_scales,
-            input_sf=a1q_scale,
-            tp_size=self.tp_size,
-            tp_rank=self.tp_rank,
-            ep_size=self.ep_size,
-            ep_rank=self.ep_rank,
-            output=output,
-        )
+        try:
+            _ = flashinfer_cutlass_fused_moe(
+                input=hidden_states,
+                token_selected_experts=topk_ids.to(torch.int),
+                token_final_scales=topk_weights,
+                fc1_expert_weights=fc1_expert_weights,
+                fc2_expert_weights=fc2_expert_weights,
+                output_dtype=self.out_dtype,
+                quant_scales=quant_scales,
+                input_sf=a1q_scale,
+                tp_size=self.tp_size,
+                tp_rank=self.tp_rank,
+                ep_size=self.ep_size,
+                ep_rank=self.ep_rank,
+                output=output,
+                # Help the autotuner pick configs on SM120 by reducing the
+                # token search space and disabling PDL for compatibility.
+                tune_max_num_tokens=2048,
+                enable_pdl=False,
+            )
+        except RuntimeError as e:
+            # If the autotuner cannot find a valid config with PDL disabled,
+            # retry once with PDL enabled and a slightly broader token window.
+            if "Could not find valid config" in str(e):
+                logger.warning_once(
+                    "FlashInfer CUTLASS MoE: no valid config with "
+                    "enable_pdl=False; retrying with enable_pdl=True.")
+                max_tokens = min(4096, int(hidden_states.size(0)))
+                _ = flashinfer_cutlass_fused_moe(
+                    input=hidden_states,
+                    token_selected_experts=topk_ids.to(torch.int),
+                    token_final_scales=topk_weights,
+                    fc1_expert_weights=fc1_expert_weights,
+                    fc2_expert_weights=fc2_expert_weights,
+                    output_dtype=self.out_dtype,
+                    quant_scales=quant_scales,
+                    input_sf=a1q_scale,
+                    tp_size=self.tp_size,
+                    tp_rank=self.tp_rank,
+                    ep_size=self.ep_size,
+                    ep_rank=self.ep_rank,
+                    output=output,
+                    tune_max_num_tokens=max_tokens,
+                    enable_pdl=True,
+                )
+            else:
+                raise
 
 
 def flashinfer_cutlass_moe_fp4(

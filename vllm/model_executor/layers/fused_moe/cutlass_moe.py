@@ -605,17 +605,75 @@ def run_cutlass_moe_fp4(
     c1 = _resize_cache(workspace13, (m * topk, n * 2))
     c2 = _resize_cache(workspace2, (m * topk, n))
     c3 = _resize_cache(workspace13, (m * topk, k))
-    ops.cutlass_fp4_moe_mm(c1, rep_a_fp4, w1_fp4, rep_a_blockscale,
-                           w1_blockscale, w1_alphas, problem_sizes1,
-                           expert_offsets[:-1], blockscale_offsets[:-1])
+    try:
+        ops.cutlass_fp4_moe_mm(c1, rep_a_fp4, w1_fp4, rep_a_blockscale,
+                               w1_blockscale, w1_alphas, problem_sizes1,
+                               expert_offsets[:-1],
+                               blockscale_offsets[:-1])
+    except RuntimeError as ex:
+        # SM120 fallback: if grouped GEMM initialization fails, run per-expert
+        # ungrouped FP4 GEMMs using the SM120 nvfp4 scaled_mm path.
+        if "Failed to initialize GEMM" not in str(ex):
+            raise
+        # If we are inside CUDA graph capture, do NOT attempt fallback here;
+        # let the outer scheduler retry without cudagraphs, then fallback.
+        try:
+            if torch.cuda.is_current_stream_capturing():
+                raise
+        except Exception:
+            # If API unavailable, proceed with fallback.
+            pass
+        # Fill c1 by iterating experts
+        num_experts = e
+        for ei in range(num_experts):
+            m_start = int(expert_offsets[ei].item())
+            m_end = int(expert_offsets[ei + 1].item())
+            if m_end <= m_start:
+                continue
+            sf_start = int(blockscale_offsets[ei].item())
+            sf_end = int(blockscale_offsets[ei + 1].item())
+            a_slice = rep_a_fp4[m_start:m_end, :]
+            a_sf_slice = rep_a_blockscale[sf_start:sf_end, :]
+            b_e = w1_fp4[ei]
+            b_sf_e = w1_blockscale[ei]
+            alpha_e = w1_alphas[ei:ei + 1]
+            out_e = ops.cutlass_scaled_fp4_mm(
+                a_slice, b_e, a_sf_slice, b_sf_e, alpha_e, out_dtype)
+            c1[m_start:m_end, :].copy_(out_e)
     del rep_a_fp4, rep_a_blockscale
     torch.ops._C.silu_and_mul(c2, c1)
     int_fp4, int_blockscale = ops.scaled_fp4_experts_quant(
         c2, a2_gscale, expert_offsets, blockscale_offsets, num_topk)
 
-    ops.cutlass_fp4_moe_mm(c3, int_fp4, w2_fp4, int_blockscale, w2_blockscale,
-                           w2_alphas, problem_sizes2, expert_offsets[:-1],
-                           blockscale_offsets[:-1])
+    try:
+        ops.cutlass_fp4_moe_mm(c3, int_fp4, w2_fp4, int_blockscale,
+                               w2_blockscale, w2_alphas, problem_sizes2,
+                               expert_offsets[:-1],
+                               blockscale_offsets[:-1])
+    except RuntimeError as ex:
+        if "Failed to initialize GEMM" not in str(ex):
+            raise
+        try:
+            if torch.cuda.is_current_stream_capturing():
+                raise
+        except Exception:
+            pass
+        num_experts = e
+        for ei in range(num_experts):
+            m_start = int(expert_offsets[ei].item())
+            m_end = int(expert_offsets[ei + 1].item())
+            if m_end <= m_start:
+                continue
+            sf_start = int(blockscale_offsets[ei].item())
+            sf_end = int(blockscale_offsets[ei + 1].item())
+            a_slice = int_fp4[m_start:m_end, :]
+            a_sf_slice = int_blockscale[sf_start:sf_end, :]
+            b_e = w2_fp4[ei]
+            b_sf_e = w2_blockscale[ei]
+            alpha_e = w2_alphas[ei:ei + 1]
+            out_e = ops.cutlass_scaled_fp4_mm(
+                a_slice, b_e, a_sf_slice, b_sf_e, alpha_e, out_dtype)
+            c3[m_start:m_end, :].copy_(out_e)
     del int_fp4, int_blockscale
 
     c3 = ops.shuffle_rows(c3, c_map)

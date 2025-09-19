@@ -25,10 +25,13 @@ __all__ = [
 
 def is_flashinfer_fp4_cutlass_moe_available() -> bool:
     """Return ``True`` when FlashInfer CUTLASS NV-FP4 kernels can be used."""
+    # Allow FlashInfer CUTLASS MoE on Blackwell server parts (SM100)
+    # and client/GeForce Blackwell (SM120) when requested via env flag.
     return (envs.VLLM_USE_FLASHINFER_MOE_FP4
             and has_flashinfer_cutlass_fused_moe()
             and current_platform.is_cuda()
-            and current_platform.is_device_capability(100))
+            and (current_platform.is_device_capability(100)
+                 or current_platform.is_device_capability(120)))
 
 
 def reorder_w1w3_to_w3w1(weight: torch.Tensor,

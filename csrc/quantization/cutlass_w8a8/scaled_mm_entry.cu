@@ -67,8 +67,9 @@ void cutlass_scaled_mm_sm100(torch::Tensor& c, torch::Tensor const& a,
                              std::optional<torch::Tensor> const& bias);
 #endif
 
-#if defined(ENABLE_SCALED_MM_SM90) && ENABLE_SCALED_MM_SM90 || \
-    defined(ENABLE_SCALED_MM_SM100) && ENABLE_SCALED_MM_SM100
+#if (defined(ENABLE_SCALED_MM_SM90) && ENABLE_SCALED_MM_SM90) || \
+    (defined(ENABLE_SCALED_MM_SM100) && ENABLE_SCALED_MM_SM100) || \
+    (defined(ENABLE_SCALED_MM_SM120) && ENABLE_SCALED_MM_SM120)
 void get_cutlass_moe_mm_data_caller(
     const torch::Tensor& topk_ids, torch::Tensor& expert_offsets,
     torch::Tensor& problem_sizes1, torch::Tensor& problem_sizes2,
@@ -284,7 +285,8 @@ void get_cutlass_moe_mm_data(
   // mm to run it for.
   int32_t version_num = get_sm_version_num();
 #if (defined ENABLE_CUTLASS_MOE_SM90 && ENABLE_CUTLASS_MOE_SM90) || \
-    (defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100)
+    (defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100)  || \
+    (defined ENABLE_NVFP4_SM120 && ENABLE_NVFP4_SM120)
   get_cutlass_moe_mm_data_caller(topk_ids, expert_offsets, problem_sizes1,
                                  problem_sizes2, input_permutation,
                                  output_permutation, num_experts, n, k,
@@ -304,7 +306,8 @@ void get_cutlass_moe_mm_problem_sizes(
     const int64_t k, const std::optional<torch::Tensor>& blockscale_offsets) {
   int32_t version_num = get_sm_version_num();
 #if (defined ENABLE_CUTLASS_MOE_SM90 && ENABLE_CUTLASS_MOE_SM90) || \
-    (defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100)
+    (defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100)  || \
+    (defined ENABLE_NVFP4_SM120 && ENABLE_NVFP4_SM120)
   get_cutlass_moe_mm_problem_sizes_caller(topk_ids, problem_sizes1,
                                           problem_sizes2, num_experts, n, k,
                                           blockscale_offsets);
@@ -328,7 +331,8 @@ void get_cutlass_pplx_moe_mm_data(torch::Tensor& expert_offsets,
   // mm to run it for.
   int32_t version_num = get_sm_version_num();
 #if (defined ENABLE_CUTLASS_MOE_SM90 && ENABLE_CUTLASS_MOE_SM90) || \
-    (defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100)
+    (defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100)  || \
+    (defined ENABLE_NVFP4_SM120 && ENABLE_NVFP4_SM120)
   get_cutlass_pplx_moe_mm_data_caller(expert_offsets, problem_sizes1,
                                       problem_sizes2, expert_num_tokens,
                                       num_local_experts, padded_m, n, k);

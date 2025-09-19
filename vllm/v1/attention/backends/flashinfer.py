@@ -802,7 +802,8 @@ class FlashInferImpl(AttentionImpl):
             # and value[:num_actual_tokens] because the reshape_and_cache_flash
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
-            torch.ops._C_cache_ops.reshape_and_cache_flash(
+            # Use the vLLM custom-ops wrapper for consistency with other backends
+            ops.reshape_and_cache_flash(
                 key,
                 value,
                 kv_cache[:, 0],
@@ -856,7 +857,7 @@ class FlashInferImpl(AttentionImpl):
                     kv_cache_permute,
                     k_scale=layer._k_scale_float,
                     v_scale=layer._v_scale_float,
-                    out=output[num_decode_tokens:],
+                    out=output[num_decode_tokens:].view(prefill_query.shape),
                 )
             else:
                 # prefill_query may be non-contiguous
@@ -882,7 +883,8 @@ class FlashInferImpl(AttentionImpl):
                                     original_shape=prefill_query.shape)
                 else:
                     assert self.o_sf_scale is None
-                    out = output[num_decode_tokens:]
+                    # FlashInfer TRTLLM expects out shaped like query
+                    out = output[num_decode_tokens:].view(prefill_query.shape)
 
                 if attn_metadata.q_data_type != FP8_DTYPE \
                     and self.kv_cache_dtype.startswith("fp8"):
@@ -937,7 +939,7 @@ class FlashInferImpl(AttentionImpl):
                     kv_cache_permute,
                     k_scale=layer._k_scale_float,
                     v_scale=layer._v_scale_float,
-                    out=output[:num_decode_tokens],
+                    out=output[:num_decode_tokens].view(decode_query.shape),
                 )
             else:
                 # decode_query may be non-contiguous
@@ -963,7 +965,8 @@ class FlashInferImpl(AttentionImpl):
                                     original_shape=decode_query.shape)
                 else:
                     assert self.o_sf_scale is None
-                    out = output[:num_decode_tokens]
+                    # FlashInfer TRTLLM expects out shaped like query
+                    out = output[:num_decode_tokens].view(decode_query.shape)
 
                 trtllm_batch_decode_with_kv_cache(
                     query=decode_query,

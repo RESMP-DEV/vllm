@@ -583,7 +583,10 @@ class SharedResizableBuffer:
         if (self.buffer is None or self.buffer.numel() < shape_numel
                 or self.buffer.device != device or self.buffer.dtype != dtype):
             self.buffer = torch.empty(shape_numel, device=device, dtype=dtype)
-        return self.buffer[:shape_numel].view(*shape)
+        # Use view(shape) instead of view(*shape) so that an empty tuple
+        # (i.e., scalar shape) is handled correctly without raising a
+        # TypeError in recent PyTorch versions.
+        return self.buffer[:shape_numel].view(shape)
 
 
 @final

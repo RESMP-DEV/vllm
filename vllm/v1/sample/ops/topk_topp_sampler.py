@@ -37,7 +37,7 @@ class TopKTopPSampler(nn.Module):
         if logprobs_mode not in ("processed_logits", "processed_logprobs"
                                  ) and current_platform.is_cuda():
             if is_flashinfer_available:
-                flashinfer_version = flashinfer.__version__
+                flashinfer_version = getattr(flashinfer, "__version__", "0.0.0")
                 if version.parse(flashinfer_version) < version.parse("0.2.3"):
                     logger.warning_once(
                         "FlashInfer version >= 0.2.3 required. "

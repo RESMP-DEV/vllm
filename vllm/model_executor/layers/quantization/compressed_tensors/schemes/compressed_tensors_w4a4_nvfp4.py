@@ -106,14 +106,29 @@ class CompressedTensorsW4A4Fp4(CompressedTensorsScheme):
             weight_scale = layer.weight_scale.data
 
             epilogue_tile_m = 128
-            weight = shuffle_matrix_a(weight.view(torch.uint8),
-                                      epilogue_tile_m)
-            weight_scale = (shuffle_matrix_sf_a(weight_scale.view(
-                torch.uint8), epilogue_tile_m).reshape(
-                    weight_scale.shape).view(torch.float8_e4m3fn))
+            # TRT-LLM backend requires M (rows) to be a multiple of 128 for
+            # its shuffle layout. If not satisfied, fall back to a CUTLASS
+            # compatible layout and mark backend override for this layer.
+            if (weight.shape[0] % epilogue_tile_m) == 0:
+                weight = shuffle_matrix_a(weight.view(torch.uint8),
+                                          epilogue_tile_m)
+                weight_scale = (shuffle_matrix_sf_a(weight_scale.view(
+                    torch.uint8), epilogue_tile_m).reshape(
+                        weight_scale.shape).view(torch.float8_e4m3fn))
 
-            layer.weight_scale = Parameter(weight_scale, requires_grad=False)
-            layer.weight_packed = Parameter(weight, requires_grad=False)
+                layer.weight_scale = Parameter(weight_scale,
+                                               requires_grad=False)
+                layer.weight_packed = Parameter(weight,
+                                                requires_grad=False)
+            else:
+                # Per-layer backend override to avoid TRT-LLM alignment issues.
+                # Use CUTLASS-compatible swizzled scales for this layer.
+                layer._nvfp4_backend_override = "flashinfer-cutlass"
+                swizzled_weight_scale = swizzle_blockscale(layer.weight_scale)
+                layer.weight_scale = Parameter(swizzled_weight_scale,
+                                               requires_grad=False)
+                layer.weight_packed = Parameter(layer.weight_packed.data,
+                                                requires_grad=False)
         else:
             swizzled_weight_scale = swizzle_blockscale(layer.weight_scale)
             layer.weight_scale = Parameter(swizzled_weight_scale,
@@ -149,9 +164,10 @@ class CompressedTensorsW4A4Fp4(CompressedTensorsScheme):
 
         mm_args = (x_fp4, layer.weight_packed, x_blockscale,
                    layer.weight_scale, layer.alpha, output_dtype)
-        if self.backend == "flashinfer-trtllm":
+        backend = getattr(layer, "_nvfp4_backend_override", self.backend)
+        if backend == "flashinfer-trtllm":
             out = flashinfer_scaled_fp4_mm(*mm_args, backend="trtllm")
-        elif self.backend == "flashinfer-cutlass":
+        elif backend == "flashinfer-cutlass":
             out = flashinfer_scaled_fp4_mm(*mm_args, backend="cutlass")
         else:
             out = cutlass_scaled_fp4_mm(*mm_args)

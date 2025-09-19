@@ -29,8 +29,10 @@ def detect_nvfp4_moe_support(class_name: str = "") -> NvFp4Support:
     """Detect platform support for NV-FP4 fused-MoE path"""
     cutlass_supported = cutlass_fp4_supported()
 
-    allow_flashinfer = (cutlass_supported
-                        and is_flashinfer_fp4_cutlass_moe_available())
+    # Allow FlashInfer fused-MoE independently of vLLM CUTLASS support.
+    # On newer architectures (e.g., SM120), vLLM's CUTLASS kernels for
+    # NVFP4 MoE may be unavailable while FlashInfer provides support.
+    allow_flashinfer = is_flashinfer_fp4_cutlass_moe_available()
 
     if allow_flashinfer:
         _logger.info_once("Using FlashInfer kernels for %s.", class_name
@@ -43,7 +45,7 @@ def detect_nvfp4_moe_support(class_name: str = "") -> NvFp4Support:
             )
 
     use_marlin = False
-    if not cutlass_supported:
+    if not cutlass_supported and not allow_flashinfer:
         if is_fp4_marlin_supported():
             use_marlin = True
             _logger.info_once("Falling back to Marlin FP4 MoE kernel.")
